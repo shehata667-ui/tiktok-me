@@ -101,7 +101,7 @@ fun JobCard(j: ExportJob, onCompare: (ExportJob) -> Unit) {
     AppCard(Modifier.fillMaxWidth().animateContentSize()) {
         Column(Modifier.padding(Sp.lg), verticalArrangement = Arrangement.spacedBy(Sp.sm)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Sp.sm)) {
-                Text(j.name, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(midEllipsis(j.name), Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 StatusPill(j.status)
             }
             when (j.status) {
@@ -125,9 +125,10 @@ fun JobCard(j: ExportJob, onCompare: (ExportJob) -> Unit) {
                             Button(onClick = { openVideo(ctx, Uri.parse(u)) }, Modifier.weight(1f)) {
                                 Icon(Icons.Default.PlayArrow, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text("تشغيل")
                             }
-                            OutlinedButton(onClick = { shareVideo(ctx, Uri.parse(u)) }, Modifier.weight(1f)) {
-                                Icon(Icons.Default.Share, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text("مشاركة")
+                            OutlinedButton(onClick = { shareToTikTok(ctx, Uri.parse(u)) }, Modifier.weight(1f)) {
+                                Icon(Icons.Default.Share, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text("TikTok")
                             }
+                            TextButton(onClick = { shareVideo(ctx, Uri.parse(u)) }) { Text("مشاركة") }
                             TextButton(onClick = { onCompare(j) }) { Text("مقارنة") }
                         }
                     }
