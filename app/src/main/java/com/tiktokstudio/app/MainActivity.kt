@@ -128,9 +128,9 @@ fun HomeScreen(videoCount: Int, activeJobs: Int, doneJobs: Int, onVideos: () -> 
             if (videoCount == 0) "ابدأ بإضافة فيديو من هاتفك" else "$videoCount فيديو في القائمة",
             Icons.Default.VideoLibrary, onVideos)
         Row(horizontalArrangement = Arrangement.spacedBy(Sp.md)) {
-            StatTile("$videoCount", "فيديو", Modifier.weight(1f))
+            StatTile("$videoCount", "في القائمة", Modifier.weight(1f))
             StatTile("$activeJobs", "قيد المعالجة", Modifier.weight(1f))
-            StatTile("$doneJobs", "تمت", Modifier.weight(1f))
+            StatTile("$doneJobs", "جاهزة", Modifier.weight(1f))
         }
         AppCard(Modifier.fillMaxWidth()) {
             ActionRow(Icons.Default.History, "المعالجة والسجل", if (activeJobs > 0) "$activeJobs في الطابور حاليًا" else "الطابور والنتائج الجاهزة", activeJobs, onQueue)
@@ -217,7 +217,7 @@ fun VideoRow(v: VideoInfo, checked: Boolean, onAnalyze: () -> Unit, onEdit: () -
                 }
                 Spacer(Modifier.width(Sp.md))
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(v.name, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)
+                    Text(midEllipsis(v.name), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)
                     Text("${v.resolution} • ${v.fpsText}", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Pill(v.sizeText, cs.surfaceVariant, cs.onSurfaceVariant)
