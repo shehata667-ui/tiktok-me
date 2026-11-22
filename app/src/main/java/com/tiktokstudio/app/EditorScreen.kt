@@ -1,12 +1,16 @@
 package com.tiktokstudio.app
 
 import android.content.Intent
+import android.graphics.Bitmap
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -20,16 +24,23 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.documentfile.provider.DocumentFile
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.util.Locale
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -43,6 +54,29 @@ fun EditorScreen(info: VideoInfo, batch: List<VideoInfo>, onBack: () -> Unit, on
     var added by remember { mutableStateOf<String?>(null) }
     var showKey by remember { mutableStateOf(false) }
     var hasKey by remember { mutableStateOf(Prefs.openAiKey(ctx).isNotBlank()) }
+    var showPreview by remember { mutableStateOf(false) }
+    // كادر واحد من عند بداية القص بيتسحب مرة، والمعاينة بتتبني منه مع كل تغيير في الإعدادات
+    val previewFrame by produceState<Bitmap?>(null, showPreview, s.trimStartMs) {
+        if (!showPreview) return@produceState
+        value = withContext(Dispatchers.IO) {
+            val r = MediaMetadataRetriever()
+            try {
+                r.setDataSource(ctx, info.uri)
+                val tUs = s.trimStartMs.coerceIn(0L, (info.durationMs - 1).coerceAtLeast(0L)) * 1000L
+                r.getFrameAtTime(tUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)?.let { b ->
+                    val k = 960f / maxOf(b.width, b.height)
+                    if (k < 1f) Bitmap.createScaledBitmap(b, (b.width * k).toInt().coerceAtLeast(1), (b.height * k).toInt().coerceAtLeast(1), true) else b
+                }
+            } catch (e: Exception) { null } finally { r.release() }
+        }
+    }
+    val previewBmp = remember(previewFrame, s.rotation, s.mode, s.cropPos, wm, s.hookText) {
+        previewFrame?.let { f ->
+            var p = composePreview(ctx, f, s, wm)
+            if (s.hookText.isNotBlank()) { val h = drawHookPreview(p, s.hookText.trim()); p.recycle(); p = h }
+            p
+        }
+    }
     val plan = remember(s, info) { makePlan(info, s) }
     val others = batch.filter { it.uri != info.uri }
     val valid = s.trimEndMs - s.trimStartMs >= 500
@@ -65,18 +99,27 @@ fun EditorScreen(info: VideoInfo, batch: List<VideoInfo>, onBack: () -> Unit, on
 
     if (showKey) {
         var kt by remember { mutableStateOf("") }
+        var saveError by remember { mutableStateOf(false) }
+        val secureOk = remember { Prefs.secureKeyStorageAvailable(ctx) }
         AlertDialog(
             onDismissRequest = { showKey = false },
             title = { Text("مفتاح OpenAI") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("المفتاح بيتحفظ على موبايلك بس وبيتبعت لـ OpenAI مباشرة. التفريغ بيتحاسب على حسابك (حساب API منفصل عن اشتراك ChatGPT).",
+                    Text("المفتاح بيتحفظ مشفر على موبايلك بس وبيتبعت لـ OpenAI مباشرة. التفريغ بيتحاسب على حسابك (حساب API منفصل عن اشتراك ChatGPT).",
                         style = MaterialTheme.typography.bodySmall)
-                    OutlinedTextField(value = kt, onValueChange = { kt = it }, label = { Text("sk-...") }, singleLine = true,
+                    if (!secureOk) Banner(BannerKind.Warning, "التخزين المشفر مش متاح على الجهاز ده، فمش هينفع حفظ المفتاح بأمان. جرّب تحديث النظام أو Google Play services.")
+                    if (saveError) Banner(BannerKind.Warning, "حفظ المفتاح فشل. المفتاح مش متخزن، جرّب تاني.")
+                    OutlinedTextField(value = kt, onValueChange = { kt = it; saveError = false }, label = { Text("sk-...") }, singleLine = true,
                         visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
                 }
             },
-            confirmButton = { TextButton(onClick = { if (kt.isNotBlank()) { Prefs.setOpenAiKey(ctx, kt); hasKey = true }; showKey = false }) { Text("حفظ") } },
+            confirmButton = { TextButton(onClick = {
+                if (kt.isNotBlank()) {
+                    if (Prefs.setOpenAiKey(ctx, kt)) { hasKey = true; showKey = false }
+                    else saveError = true
+                } else showKey = false
+            }) { Text("حفظ") } },
             dismissButton = {
                 Row {
                     if (hasKey) TextButton(onClick = { Prefs.setOpenAiKey(ctx, ""); hasKey = false; showKey = false }) { Text("مسح المفتاح") }
@@ -86,6 +129,27 @@ fun EditorScreen(info: VideoInfo, batch: List<VideoInfo>, onBack: () -> Unit, on
         )
     }
 
+    BackHandler(enabled = showWm) { showWm = false }
+    if (showPreview) {
+        AlertDialog(
+            onDismissRequest = { showPreview = false },
+            confirmButton = { TextButton(onClick = { showPreview = false }) { Text("تم") } },
+            title = { Text("معاينة النتيجة") },
+            text = {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(Sp.sm)) {
+                    val p = previewBmp
+                    if (p != null) Image(p.asImageBitmap(), "معاينة", Modifier.fillMaxWidth().height(360.dp).clip(RoundedCornerShape(12.dp)), contentScale = ContentScale.Fit)
+                    else Text("جاري تجهيز المعاينة...", style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        "كادر من عند بداية القص (${formatDuration(s.trimStartMs)}) بنفس القص والتدوير" +
+                            (if (wm.hasContent) " والعلامة المائية" else "") +
+                            (if (s.hookText.isNotBlank()) " والهوك" else "") +
+                            ". الكابشن بيظهر في الناتج فقط.",
+                        style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                }
+            },
+        )
+    }
     BackHandler(enabled = showWm) { showWm = false }
     if (showWm) WatermarkScreen(info, s, wm, { wm = it; WmStore.saveLast(ctx, it) }, { showWm = false }) else Scaffold(
         topBar = {
@@ -118,7 +182,7 @@ fun EditorScreen(info: VideoInfo, batch: List<VideoInfo>, onBack: () -> Unit, on
                 Row(Modifier.padding(Sp.md), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Sp.md)) {
                     Thumb(info.uri, 76.dp)
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text(info.name, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(midEllipsis(info.name, 44), style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text("${info.resolution} • ${info.fpsText}", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
                         Text("${info.durationText} • ${info.sizeText}", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
                     }
@@ -133,6 +197,9 @@ fun EditorScreen(info: VideoInfo, batch: List<VideoInfo>, onBack: () -> Unit, on
                 onClick = { s = s.copy(preset = Preset.BEST, quality = Quality.EFFICIENT, codec = Codec.AUTO, fpsCap = 0, cfrFps = 0) },
                 modifier = Modifier.fillMaxWidth()
             ) { Text("أقصى جودة بأقل حجم (4K / H.265)") }
+            OutlinedButton(onClick = { showPreview = true }, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Default.Visibility, null); Spacer(Modifier.width(8.dp)); Text("معاينة النتيجة (كادر من الفيديو)")
+            }
 
             Panel("الدقة والإطار", Icons.Default.Crop) {
                 Text("الدقة", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
@@ -140,7 +207,7 @@ fun EditorScreen(info: VideoInfo, batch: List<VideoInfo>, onBack: () -> Unit, on
                 Text("طريقة الملء", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
                 Chips(FitMode.entries, s.mode, { it.label }, true) { s = s.copy(mode = it) }
                 if (s.mode == FitMode.FILL) {
-                    Text("موضع القص", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                    Text("موضع القص: ${(s.cropPos * 100).roundToInt()}%", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
                     Slider(value = s.cropPos, onValueChange = { s = s.copy(cropPos = it) })
                 }
                 OutlinedButton(onClick = { s = s.copy(rotation = (s.rotation + 90) % 360) }) {
@@ -171,6 +238,29 @@ fun EditorScreen(info: VideoInfo, batch: List<VideoInfo>, onBack: () -> Unit, on
 
             Panel("القص والصوت", Icons.Default.ContentCut) {
                 val total = info.durationMs.coerceAtLeast(1).toFloat()
+                val strip by produceState<List<Bitmap>>(emptyList()) {
+                    value = withContext(Dispatchers.IO) {
+                        val r = MediaMetadataRetriever()
+                        try {
+                            r.setDataSource(ctx, info.uri)
+                            val dur = info.durationMs.coerceAtLeast(1)
+                            (0..7).mapNotNull { i ->
+                                r.getFrameAtTime(dur * 1000L * i / 7, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)?.let { b ->
+                                    val h = 96
+                                    Bitmap.createScaledBitmap(b, (b.width * h.toFloat() / b.height).toInt().coerceAtLeast(1), h, true)
+                                }
+                            }
+                        } catch (e: Exception) { emptyList() } finally { r.release() }
+                    }
+                }
+                if (strip.isNotEmpty()) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                        strip.forEach { b ->
+                            Image(b.asImageBitmap(), null, Modifier.weight(1f).height(48.dp).clip(RoundedCornerShape(4.dp)), contentScale = ContentScale.Crop)
+                        }
+                    }
+                    Text("كوادر من الفيديو بالترتيب عشان تساعدك تحدد بداية القص ونهايته", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                }
                 RangeSlider(
                     value = s.trimStartMs.toFloat()..s.trimEndMs.toFloat(),
                     onValueChange = { r ->
@@ -179,6 +269,27 @@ fun EditorScreen(info: VideoInfo, batch: List<VideoInfo>, onBack: () -> Unit, on
                     },
                     valueRange = 0f..total)
                 Text("من ${formatDuration(s.trimStartMs)} إلى ${formatDuration(s.trimEndMs)}", color = cs.onSurfaceVariant)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Sp.sm), verticalAlignment = Alignment.CenterVertically) {
+                    Text("البداية:", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                    OutlinedButton(onClick = {
+                        val a = (s.trimStartMs - 1000).coerceAtLeast(0)
+                        if (s.trimEndMs - a >= 500) s = s.copy(trimStartMs = a)
+                    }) { Text("−1 ث") }
+                    OutlinedButton(onClick = {
+                        val a = (s.trimStartMs + 1000).coerceAtMost(info.durationMs)
+                        if (s.trimEndMs - a >= 500) s = s.copy(trimStartMs = a)
+                    }) { Text("+1 ث") }
+                    Spacer(Modifier.weight(1f))
+                    Text("النهاية:", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                    OutlinedButton(onClick = {
+                        val b = (s.trimEndMs - 1000).coerceAtLeast(0)
+                        if (b - s.trimStartMs >= 500) s = s.copy(trimEndMs = b)
+                    }) { Text("−1 ث") }
+                    OutlinedButton(onClick = {
+                        val b = (s.trimEndMs + 1000).coerceAtMost(info.durationMs)
+                        if (b - s.trimStartMs >= 500) s = s.copy(trimEndMs = b)
+                    }) { Text("+1 ث") }
+                }
                 SwitchRow("كتم الصوت", s.mute) { s = s.copy(mute = it) }
             }
 
@@ -186,16 +297,17 @@ fun EditorScreen(info: VideoInfo, batch: List<VideoInfo>, onBack: () -> Unit, on
                 if (!info.hasAudioGuess || s.mute) Banner(BannerKind.Info, "الفيديو من غير صوت أو الصوت مكتوم: القص الذكي والكابشن مش هيشتغلوا.")
                 SwitchRow("قص السكتات تلقائيًا", s.cutSilence) { s = s.copy(cutSilence = it) }
                 if (s.cutSilence) {
-                    Text("الحساسية (أعلى = قص أكتر)", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                    Text("الحساسية: ${(s.silenceSens * 100).roundToInt()}% (أعلى = قص أكتر)", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
                     Slider(value = s.silenceSens, onValueChange = { s = s.copy(silenceSens = it) })
                 }
                 SwitchRow("كابشن تلقائي (عربي)", s.captions) { s = s.copy(captions = it) }
                 if (s.captions) {
                     SwitchRow("تمييز الكلمة الحالية", s.highlight) { s = s.copy(highlight = it) }
+                    if (!hasKey) Banner(BannerKind.Warning, "مفتاح OpenAI غير محفوظ: الكابشن بيتخطى وباقي المعالجة بتكمل عادي.")
                     OutlinedButton(onClick = { showKey = true }, Modifier.fillMaxWidth()) {
                         Text(if (hasKey) "مفتاح OpenAI: محفوظ ✓ (تغيير)" else "إضافة مفتاح OpenAI (مطلوب للكابشن)")
                     }
-                    Text("من غير مفتاح الكابشن بيتخطى وباقي المعالجة بتكمل عادي.", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                    if (hasKey) Text("الكابشن هيشتغل بالمفتاح المحفوظ.", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
                 }
                 OutlinedTextField(
                     value = s.hookText, onValueChange = { s = s.copy(hookText = it.take(60)) },
@@ -228,6 +340,12 @@ fun EditorScreen(info: VideoInfo, batch: List<VideoInfo>, onBack: () -> Unit, on
                 KV("معدل الإطارات", String.format(Locale.US, "%.0f fps", plan.outFps))
                 KV("معدل بت الفيديو", String.format(Locale.US, "%.1f Mbps", plan.videoBps / 1e6))
                 KV("الحجم التقريبي", "${formatSize(plan.estBytes)} (الأصل ${info.sizeText})")
+                if (plan.estBytes > info.sizeBytes) {
+                    Banner(BannerKind.Warning, "الناتج المتوقع أكبر من الفيديو الأصلي. لو هدفك حجم أصغر، اختار جودة أقل أو كتم الصوت لو مش محتاجه.")
+                    if (s.codec != Codec.AUTO || s.quality != Quality.LOW) {
+                        TextButton(onClick = { s = s.copy(codec = Codec.AUTO, quality = Quality.LOW) }) { Text("خلّيه أصغر") }
+                    }
+                }
                 plan.notes.forEach { Banner(BannerKind.Info, it) }
                 Text("الحجم النهائي تقريبي، والجودة الفعلية بتتوقف على محتوى الفيديو. التقرير بعد التصدير بيوضح النتيجة.", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
             }
@@ -255,6 +373,14 @@ fun shareVideo(ctx: android.content.Context, uri: Uri) = runCatching {
     val i = Intent(Intent.ACTION_SEND).setType("video/mp4").putExtra(Intent.EXTRA_STREAM, uri)
         .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     ctx.startActivity(Intent.createChooser(i, "مشاركة").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+}
+
+/** مشاركة مباشرة لتطبيق TikTok لو متثبت، ولو مش موجود بترجع لقائمة المشاركة العادية. */
+fun shareToTikTok(ctx: android.content.Context, uri: Uri) {
+    val i = Intent(Intent.ACTION_SEND).setType("video/mp4").putExtra(Intent.EXTRA_STREAM, uri)
+        .setPackage("com.zhiliaoapp.musically")
+        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+    try { ctx.startActivity(i) } catch (e: android.content.ActivityNotFoundException) { shareVideo(ctx, uri) }
 }
 
 @Composable
