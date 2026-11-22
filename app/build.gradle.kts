@@ -29,6 +29,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.documentfile:documentfile:1.0.1")
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
     implementation("com.google.guava:guava:33.3.1-android")
     implementation("com.google.mlkit:barcode-scanning:17.3.0")
     implementation("com.google.android.gms:play-services-tasks:18.2.0")
@@ -37,4 +38,6 @@ dependencies {
     implementation("androidx.media3:media3-effect:1.5.1")
     implementation("androidx.media3:media3-common:1.5.1")
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.13")
+    testImplementation("androidx.test:core:1.6.1")
 }
