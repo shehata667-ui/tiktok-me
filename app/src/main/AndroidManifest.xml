@@ -9,7 +9,7 @@
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
-        android:label="TikTok Video Studio"
+        android:label="TikTok Studio Review"
         android:supportsRtl="true"
         android:theme="@style/Theme.App">
         <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTop">
