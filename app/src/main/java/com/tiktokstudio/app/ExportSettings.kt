@@ -1,10 +1,13 @@
 package com.tiktokstudio.app
 
 import android.content.Context
+import android.content.SharedPreferences
 import android.media.MediaCodecInfo
 import android.media.MediaCodecList
 import android.os.Build
 import android.net.Uri
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
 import androidx.media3.common.Effect
 import androidx.media3.common.util.UnstableApi
 import android.graphics.Bitmap
@@ -204,9 +207,45 @@ object Prefs {
     private fun sp(c: Context) = c.getSharedPreferences("settings", Context.MODE_PRIVATE)
     fun outTree(c: Context): Uri? = sp(c).getString("out_tree", null)?.let(Uri::parse)
     fun setOutTree(c: Context, u: Uri) = sp(c).edit().putString("out_tree", u.toString()).apply()
-    // مفتاح OpenAI بتاع المستخدم: بيتحفظ على الجهاز بس (النسخ الاحتياطي مقفول في الـ Manifest)
-    fun openAiKey(c: Context): String = sp(c).getString("openai_key", "").orEmpty()
-    fun setOpenAiKey(c: Context, k: String) = sp(c).edit().putString("openai_key", k.trim()).apply()
+
+    // مفتاح OpenAI بتاع المستخدم: بيتحفظ مشفر على الجهاز بس (النسخ الاحتياطي مقفول في الـ Manifest).
+    // مفيش تخزين عادي كبديل: لو التشفير مش متاح بنرفض الحفظ وبانبيه المستخدم بدل ما المفتاح يتخزن مكشوف.
+    private fun secureSp(c: Context): SharedPreferences? = runCatching {
+        val master = MasterKey.Builder(c).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
+        EncryptedSharedPreferences.create(
+            c, "secure_settings", master,
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM)
+    }.getOrNull()
+
+    /** هل التخزين المشفر متاح على الجهاز ده (الواجهة بتعرض تنبيه لو مش متاح) */
+    fun secureKeyStorageAvailable(c: Context): Boolean = secureSp(c) != null
+
+    fun openAiKey(c: Context): String {
+        val legacy = sp(c).getString("openai_key", "").orEmpty()
+        val secure = secureSp(c) ?: return legacy // قراءة مفتاح قديم موجود فعلاً، من غير تخزين جديد مكشوف
+        val k = secure.getString("openai_key", null)
+        if (k != null) return k
+        // نقل تلقائي من التخزين العادي القديم، والحذف بس بعد ما الحفظ المشفر ينجح
+        if (legacy.isNotBlank()) {
+            runCatching {
+                secure.edit().putString("openai_key", legacy).commit()
+            }.onSuccess { committed -> if (committed) sp(c).edit().remove("openai_key").apply() }
+            return legacy
+        }
+        return ""
+    }
+
+    /** يرجع true لو المفتاح اتحفظ مشفر. يرجع false لو التشفير مش متاح، وفي الحالة دي المفتاح مش بيتخزن خالص. */
+    fun setOpenAiKey(c: Context, k: String): Boolean {
+        val v = k.trim()
+        val secure = secureSp(c) ?: return false
+        return runCatching {
+            val committed = secure.edit().putString("openai_key", v).commit()
+            if (committed) sp(c).edit().remove("openai_key").apply()
+            committed
+        }.getOrDefault(false)
+    }
 }
 
 object AppLog {
