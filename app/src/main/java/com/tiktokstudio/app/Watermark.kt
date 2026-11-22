@@ -166,3 +166,31 @@ fun composePreview(ctx: Context, frame: Bitmap, s: ExportSettings, wm: Watermark
     }
     return out
 }
+
+/** رسم الهوك على صورة المعاينة بشكل قريب من HookOverlay في الناتج (نص غامق على خلفية تركواز أعلى الصورة) */
+fun drawHookPreview(base: Bitmap, text: String): Bitmap {
+    val out = base.copy(Bitmap.Config.ARGB_8888, true)
+    val c = Canvas(out)
+    val paint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = base.width * 0.072f
+        typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+        color = 0xFF00201A.toInt()
+    }
+    val wrapped = wrapText(text, 16)
+    val maxW = (base.width * 0.86f).toInt()
+    val boxW = min(ceil(StaticLayout.getDesiredWidth(wrapped, paint)).toInt().coerceAtLeast(1), maxW)
+    val layout = StaticLayout.Builder.obtain(wrapped, 0, wrapped.length, paint, boxW)
+        .setAlignment(Layout.Alignment.ALIGN_CENTER).build()
+    val pad = paint.textSize * 0.4f
+    val bw = boxW + pad * 2
+    val bh = layout.height + pad * 2
+    val bx = (base.width - bw) / 2f
+    val by = base.height * 0.16f
+    val bg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF2DE2C4.toInt() }
+    c.drawRoundRect(RectF(bx, by, bx + bw, by + bh), pad * 0.6f, pad * 0.6f, bg)
+    c.save()
+    c.translate(bx + pad, by + pad)
+    layout.draw(c)
+    c.restore()
+    return out
+}
