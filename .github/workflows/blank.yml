@@ -23,8 +23,7 @@ jobs:
         shell: bash
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
 
-      - name: Unit tests (مش حاجزة للبناء)
-        continue-on-error: true
+      - name: Unit tests
         shell: bash
         run: gradle testDebugUnitTest --stacktrace
 
