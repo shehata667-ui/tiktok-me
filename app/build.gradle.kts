@@ -7,7 +7,7 @@ android {
     namespace = "com.tiktokstudio.app"
     compileSdk = 35
     defaultConfig {
-        applicationId = "com.tiktokstudio.app"
+        applicationId = "com.tiktokstudio.app.review"
         minSdk = 27
         targetSdk = 35
         versionCode = 1
