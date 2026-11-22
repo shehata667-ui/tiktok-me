@@ -38,6 +38,15 @@ fun formatDuration(ms: Long): String {
     return String.format(Locale.US, "%d:%02d", s / 60, s % 60)
 }
 
+/** قص النص الطويل من النص بعلامة … مع الحفاظ على بداية الاسم ونهايته (الامتداد والتاريخ). */
+fun midEllipsis(s: String, max: Int = 36): String {
+    if (s.length <= max) return s
+    val keep = max - 1
+    val head = keep / 2 + keep % 2
+    val tail = keep / 2
+    return s.take(head) + "…" + s.takeLast(tail)
+}
+
 /** يقرأ معلومات الفيديو بدون تحميله في الذاكرة. يرجع null لو الملف مش فيديو صالح. */
 fun readVideoInfo(ctx: Context, uri: Uri): VideoInfo? {
     var name = "video"
